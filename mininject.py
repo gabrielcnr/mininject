@@ -37,7 +37,14 @@ def inject(**params):
                     p_map = params[missing_param]
                     container_name, attr_name = p_map.split('.')
                     value = containers[container_name][attr_name]   # TODO: handle missing container or attribute
-                    kwargs[missing_param] = value
+
+                    # a positional-only argument cannot be passed as kwargs
+                    if sig.parameters[missing_param].kind == inspect.Parameter.POSITIONAL_ONLY:
+                        args = list(args)
+                        args.insert(sig_params.index(missing_param), value)
+                        args = tuple(args)
+                    else:
+                        kwargs[missing_param] = value
             return func(*args, **kwargs)
 
         return wrapper
@@ -111,3 +118,18 @@ def test_invalid_injection_mapping():
         @inject(x='MyContainer.foo.bar')
         def foo(x: int) -> int:
             ...
+
+
+def test_injection_with_multiple_args_when_injected_parameter_is_a_positional_only_arg():
+    @inject(x='MyContainer.foo')
+    def foo(x: int, /, y: int, z: int) -> int:
+        return x + y + z
+
+    assert foo(y=2, z=3) == 105
+
+    assert foo(20, 2, 3) == 25
+
+    assert foo(20, z=5, y=2) == 27
+
+    with pytest.raises(TypeError):
+        foo(x=20, y=2, z=3)
