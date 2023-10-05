@@ -11,6 +11,15 @@ containers = {
     },
 }
 
+def register_container(cls):
+    containers[cls.__name__] = cls()
+    return cls
+
+
+@register_container
+class MyContainer:
+    foo: int = (int, 100)
+
 def inject(**params):
 
     def decorator(func):
@@ -133,3 +142,11 @@ def test_injection_with_multiple_args_when_injected_parameter_is_a_positional_on
 
     with pytest.raises(TypeError):
         foo(x=20, y=2, z=3)
+
+
+def test_cannot_register_container_with_same_name():
+    with pytest.raises(ValueError, match='Container with name: MyContainer already registered'):
+        @register_container
+        class MyContainer:
+            ...
+
