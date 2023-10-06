@@ -1,11 +1,10 @@
 import functools
 import inspect
-from typing import Any
 
 import pytest
 
 import container
-from injectable import Injectable
+from injectable import Injectable, _get_injected_value_from_container
 
 
 class MyContainer(container.Container):
@@ -19,14 +18,6 @@ container_obj.initialize()
 @pytest.fixture(autouse=True)
 def clear_containers():
     container._containers_registry.clear()
-
-
-def _get_injected_value_from_container(injectable: Injectable) -> Any:
-    container_cls = injectable.container
-    container_instance = container_cls.get_initialized_container_instance()
-    if container_instance is None:
-        raise RuntimeError(f'Container: {container_cls.__name__} is not initialized')
-    return getattr(container_instance, injectable.name)
 
 
 def inject(**params):

@@ -1,4 +1,6 @@
 import itertools
+import operator
+from typing import Any
 
 import pytest
 
@@ -34,6 +36,12 @@ class Injectable:
     def index(self):
         return self.__index
 
+    def __repr__(self):
+        if self.container is None:
+            return f'<unbound Injectable({self.factory})>'
+        else:
+            return f'<Injectable({self.factory.__name__}) bound to {self.container.__name__}.{self.name}>'
+
     def __set_name__(self, owner, name):
         from container import Container
 
@@ -54,13 +62,37 @@ class Injectable:
         if self.name in vars(instance):
             return vars(instance)[self.name]
 
-        value = self.factory(*self.args, **self.kwargs)
+        def resolve_injectable(arg):
+            if isinstance(arg, Injectable):
+                if isinstance(instance, arg.container):
+                    container = instance  # this is how we support dependencies from the same container that is not fully initialized yet
+                else:
+                    container = arg.container.get_initialized_container_instance()  # the other container must be already initialized
+                return _get_injected_value_from_container(arg, container)
+            else:
+                return arg
+
+        args = [resolve_injectable(arg) for arg in self.args]
+
+        kwargs = {k: resolve_injectable(v) for k, v in self.kwargs.items()}
+
+        value = self.factory(*args, **kwargs)
 
         vars(instance)[self.name] = value
         return value
 
     def __set__(self, instance, value):
         raise AttributeError('Injectables are read-only')
+
+
+def _get_injected_value_from_container(injectable: Injectable, container_instance=None) -> Any:
+    if container_instance is None:
+        container_cls = injectable.container
+        container_instance = container_cls.get_initialized_container_instance()
+        if container_instance is None:
+            raise RuntimeError(f'Container: {container_cls.__name__} is not initialized')
+
+    return getattr(container_instance, injectable.name)
 
 
 def test_injectable_must_be_owned_by_container():
@@ -146,3 +178,35 @@ def test_cannot_reuse_injectable_in_more_than_one_container():
     with pytest.raises(RuntimeError, match='Injectable is already bound to a Container'):
         class MyOtherContainer(Container):
             foo = _foo
+
+
+def test_injectable_can_depend_on_other_injectables_that_are_already_initialized():
+    from container import Container
+
+    class MyContainer(Container):
+        x = Injectable(int, 100)
+        y = Injectable(operator.mul, x, 5)
+
+    container = MyContainer()
+    container.initialize()
+
+    assert container.x == 100
+    assert container.y == 500
+
+def test_injectable_can_depend_on_other_injectables_from_other_containers_that_are_already_initialized():
+    from container import Container
+
+    class ContainerA(Container):
+        x = Injectable(int, 100)
+
+    class ContainerB(Container):
+        y = Injectable(operator.mul, ContainerA.x, 5)
+
+    container_a = ContainerA()
+    container_a.initialize()
+
+    container_b = ContainerB()
+    container_b.initialize()
+
+    assert container_a.x == 100
+    assert container_b.y == 500
