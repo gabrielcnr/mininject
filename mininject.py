@@ -1,39 +1,45 @@
 import functools
 import inspect
+from typing import Any
 
 import pytest
 
-
-# TODO: decide how to register / declare the containers and how to initialize them
-containers = {
-    'MyContainer': {
-        'foo': 100,
-    },
-}
-
-def register_container(cls):
-    containers[cls.__name__] = cls()
-    return cls
+import container
+from injectable import Injectable
 
 
-@register_container
-class MyContainer:
-    foo: int = (int, 100)
+class MyContainer(container.Container):
+    foo = Injectable(int, 100)
+
+
+container_obj = MyContainer()
+container_obj.initialize()
+
+
+@pytest.fixture(autouse=True)
+def clear_containers():
+    container._containers_registry.clear()
+
+
+def _get_injected_value_from_container(injectable: Injectable) -> Any:
+    container_cls = injectable.container
+    container_instance = container_cls.get_initialized_container_instance()
+    if container_instance is None:
+        raise RuntimeError(f'Container: {container_cls.__name__} is not initialized')
+    return getattr(container_instance, injectable.name)
+
 
 def inject(**params):
-
     def decorator(func):
 
         sig = inspect.signature(func)
 
-        sig_params = list(sig.parameters)
-
         # all the given params must be present inside the function signature
-        for p, p_map in params.items():
-            if p not in sig_params:
+        for p, injectable in params.items():
+            if p not in sig.parameters:
                 raise ValueError(f'Injected parameter: {p} not present in function {func.__name__}() signature')
-            elif len([part for part in p_map.split('.') if part]) != 2:
-                raise ValueError(f'Injected parameter: {p} must be in the form: \'container_name.attribute_name\'')
+            elif not isinstance(injectable, Injectable):
+                raise TypeError(f'Injected parameter: {p} must be an instance of Injectable - got: {type(injectable)}')
             elif sig.parameters[p].default is not inspect.Parameter.empty:
                 raise ValueError(f'Injected parameter: {p} cannot have a default value')
             # TODO: if the parameter has a type annotation, check that the type is the same as the one in the container
@@ -43,14 +49,14 @@ def inject(**params):
             missing = find_missing_args_and_kwargs_on_func_call(func, *args, **kwargs)
             for missing_param in missing:
                 if missing_param in params:
-                    p_map = params[missing_param]
-                    container_name, attr_name = p_map.split('.')
-                    value = containers[container_name][attr_name]   # TODO: handle missing container or attribute
+                    injectable = params[missing_param]
+
+                    value = _get_injected_value_from_container(injectable)
 
                     # a positional-only argument cannot be passed as kwargs
                     if sig.parameters[missing_param].kind == inspect.Parameter.POSITIONAL_ONLY:
                         args = list(args)
-                        args.insert(sig_params.index(missing_param), value)
+                        args.insert(list(sig.parameters).index(missing_param), value)
                         args = tuple(args)
                     else:
                         kwargs[missing_param] = value
@@ -60,6 +66,7 @@ def inject(**params):
 
     return decorator
 
+
 def find_missing_args_and_kwargs_on_func_call(func, *args, **kwargs):
     sig = inspect.signature(func)
     bound = sig.bind_partial(*args, **kwargs)
@@ -68,16 +75,15 @@ def find_missing_args_and_kwargs_on_func_call(func, *args, **kwargs):
     return [m.name for m in missing]
 
 
-
 def test_injected_parameters_must_be_present_in_function_signature():
     with pytest.raises(ValueError):
-        @inject(y='x.y')
+        @inject(y=MyContainer.foo, match='not present in function .* signature')
         def foo(x: int) -> int:
             ...
 
 
 def test_simple_injection_single_arg():
-    @inject(x='MyContainer.foo')
+    @inject(x=MyContainer.foo)
     def foo(x: int) -> int:
         return x
 
@@ -85,7 +91,7 @@ def test_simple_injection_single_arg():
 
 
 def test_simple_injection_multiple_arg_injection_first():
-    @inject(x='MyContainer.foo')
+    @inject(x=MyContainer.foo)
     def foo(x: int, y: int) -> int:
         return x * y
 
@@ -93,7 +99,7 @@ def test_simple_injection_multiple_arg_injection_first():
 
 
 def test_simple_injection_multiple_arg_injection_last():
-    @inject(y='MyContainer.foo')
+    @inject(y=MyContainer.foo)
     def foo(x: int, y: int) -> int:
         return y // x
 
@@ -106,31 +112,13 @@ def test_injected_parameter_cannot_be_a_kwarg_with_default_in_the_func():
     already present in the function signature.
     """
     with pytest.raises(ValueError):
-
-        @inject(y='MyContainer.foo')
+        @inject(y=MyContainer.foo)
         def foo(x: int, y: int = 100) -> int:
             return x * y
 
 
-def test_invalid_injection_mapping():
-    with pytest.raises(ValueError):
-        @inject(x='MyContainer')
-        def foo(x: int) -> int:
-            ...
-
-    with pytest.raises(ValueError):
-        @inject(x='MyContainer.')
-        def foo(x: int) -> int:
-            ...
-
-    with pytest.raises(ValueError):
-        @inject(x='MyContainer.foo.bar')
-        def foo(x: int) -> int:
-            ...
-
-
 def test_injection_with_multiple_args_when_injected_parameter_is_a_positional_only_arg():
-    @inject(x='MyContainer.foo')
+    @inject(x=MyContainer.foo)
     def foo(x: int, /, y: int, z: int) -> int:
         return x + y + z
 
@@ -144,9 +132,8 @@ def test_injection_with_multiple_args_when_injected_parameter_is_a_positional_on
         foo(x=20, y=2, z=3)
 
 
-def test_cannot_register_container_with_same_name():
-    with pytest.raises(ValueError, match='Container with name: MyContainer already registered'):
-        @register_container
-        class MyContainer:
+def test_values_passed_to_inject_decorator_must_all_be_instances_of_injectable():
+    with pytest.raises(TypeError, match='Injected parameter: y must be an instance of Injectable'):
+        @inject(x=MyContainer.foo, y='MyContainer.bar')
+        def foo(x: int, y: int) -> int:
             ...
-
