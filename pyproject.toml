@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=42", "wheel", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools_scm]
+write_to = "src/mininject/version.py"
+
+[tool.pytest.ini_options]
+addopts = "--strict-markers"
+
+[options]
+package_dir=["src"]
+
+[options.packages.find]
+where="src"
+
+[options.extras_require]
+test = [
+    "pytest>=6",
+    "pytest-mock"
+]
