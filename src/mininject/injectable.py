@@ -60,6 +60,8 @@ class Injectable:
                 else:
                     container = arg.container.get_initialized_container_instance()  # the other container must be already initialized
                 return _get_injected_value_from_container(arg, container)
+            elif isinstance(arg, LazyInjectedAttribute):
+                return arg(instance)
             else:
                 return arg
 
@@ -76,8 +78,21 @@ class Injectable:
         raise AttributeError('Injectables are read-only')
 
     def __getattr__(self, attr):
-        import pdb; pdb.set_trace()
-        return
+        return LazyInjectedAttribute(self, attr)
+
+
+class LazyInjectedAttribute:
+    """ This class is a helper that permits to access attributes of injected values lazily.
+    For example if your container has an Injectable whose factory arguments
+    access attributes of other injectables declared previously in the same container.
+    """
+    def __init__(self, injectable: Injectable, attr: str):
+        self.injectable = injectable
+        self.attr = attr
+
+    def __call__(self, container):
+        injected = _get_injected_value_from_container(self.injectable, container)
+        return getattr(injected, self.attr)
 
 
 def _get_injected_value_from_container(injectable: Injectable, container_instance=None) -> Any:
