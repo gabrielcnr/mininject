@@ -75,6 +75,10 @@ class Injectable:
     def __set__(self, instance, value):
         raise AttributeError('Injectables are read-only')
 
+    def __getattr__(self, attr):
+        import pdb; pdb.set_trace()
+        return
+
 
 def _get_injected_value_from_container(injectable: Injectable, container_instance=None) -> Any:
     if container_instance is None:

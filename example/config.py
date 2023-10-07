@@ -34,5 +34,5 @@ class ExampleConfig:
 
 def create_config_for_environment() -> ExampleConfig:
     env = get_env()
-    config = env[env]
+    config = _CONFIG[env]
     return ExampleConfig(redis_url=config['redis_url'])
